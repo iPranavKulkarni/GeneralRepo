@@ -1,0 +1,20 @@
+public static bool GetLayerFromDwg(string dwgPath)
+        {
+            var curDb = HostApplicationServices.WorkingDatabase;
+            using (var db = new Database(false, true))
+            {
+                db.ReadDwgFile(dwgPath, FileOpenMode.OpenForReadAndAllShare, true, null);
+                using (var tr = db.TransactionManager.StartOpenCloseTransaction())
+                {
+                    var layerTable = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
+                    var ids = new ObjectIdCollection();
+                    foreach (ObjectId layerId in layerTable)
+                    {
+                        ids.Add(layerId);                       
+                    }
+                    var mapping = new IdMapping();
+                    db.WblockCloneObjects(ids, curDb.LayerTableId, mapping, DuplicateRecordCloning.Replace, false);
+                    return true;
+                }
+            }
+        }
