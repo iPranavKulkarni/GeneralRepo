@@ -1,0 +1,267 @@
+[CommandMethod("MyMove")]
+        public void UseMovingJig()
+        {
+            Document doc = _AcAp.Application.DocumentManager.MdiActiveDocument;
+            Editor ed = doc.Editor;
+            try
+            {
+                GuidedMovingJig jig = new GuidedMovingJig();
+                jig.DoDrag(true);
+            }
+            catch (System.Exception ex)
+            {
+                ed.WriteMessage("\nError: {0}\n", ex.Message);
+            }
+        }
+        public class GuidedMovingJig : DrawJig
+    {
+        private Entity _entity = null;
+        private Curve _curve = null;
+        private Entity _offsetEntity = null;
+        private Document _dwg;
+        private Editor _ed;
+        private Transaction _tran = null;
+
+        private Point3d _originalPoint;
+        private Point3d _previousPoint;
+        private Point3d _currentPoint;
+        private double _currentAngle = 0;
+        private Point3d _finalPoint;
+
+        private bool _doRotation = false;
+
+        private bool _dragCancelled = false;
+
+        public GuidedMovingJig()
+        {
+            _dwg = Application.DocumentManager.MdiActiveDocument;
+            _ed = _dwg.Editor;
+        }
+
+        public void DoDrag(bool rotateAlonhgArc = false)
+        {
+            _dragCancelled = false;
+
+            using (_tran =
+                _dwg.Database.TransactionManager.StartTransaction())
+            {
+                if (GetEntities())
+                {
+                    if ((_curve is Circle || _curve is Arc) && rotateAlonhgArc)
+                    {
+                        _doRotation = true;
+                    }
+
+                    _entity.UpgradeOpen();
+
+                    try
+                    {
+                        _entity.Highlight();
+
+                        //Generate a clone entity as moving target
+                        using (_offsetEntity = _entity.Clone() as Entity)
+                        {
+                            _offsetEntity.SetDatabaseDefaults();
+
+                            //Place the moving target on guiding curve
+                            Vector3d displacement =
+                                _originalPoint.GetVectorTo(_currentPoint);
+                            _offsetEntity.TransformBy(
+                                Matrix3d.Displacement(displacement));
+
+                            //Start drag
+                            _ed.Drag(this);
+                        }
+
+                        //Move the entity to picked location after dragging
+                        if (!_dragCancelled)
+                        {
+                            if (_finalPoint != _originalPoint)
+                            {
+                                MoveEntity();
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        //Make sure the entity is unhighlighted
+                        _entity.Unhighlight();
+                    }
+                }
+
+                _tran.Commit();
+            }
+        }
+
+        protected override SamplerStatus Sampler(JigPrompts prompts)
+        {
+            JigPromptPointOptions jigOpt = new JigPromptPointOptions();
+            jigOpt.UserInputControls =
+                UserInputControls.Accept3dCoordinates |
+                UserInputControls.NoZeroResponseAccepted |
+                UserInputControls.NoNegativeResponseAccepted;
+
+            jigOpt.Message =
+                "\nMove to (pick a point or press Esc to cancel): ";
+
+            PromptPointResult movePt = prompts.AcquirePoint(jigOpt);
+
+            if (movePt.Status == PromptStatus.Cancel)
+            {
+                _dragCancelled = true;
+                return SamplerStatus.Cancel;
+            }
+            else
+            {
+                if (_previousPoint == movePt.Value)
+                    return SamplerStatus.NoChange;
+
+                _currentPoint =
+                    _curve.GetClosestPointTo(movePt.Value, false);
+
+                //Move the entity along the guiding curve
+                Vector3d displacement =
+                    _previousPoint.GetVectorTo(_currentPoint);
+                _offsetEntity.TransformBy(
+                    Matrix3d.Displacement(displacement));
+
+                //Rotate the entity, if necessary
+                if (_doRotation)
+                {
+                    //Rotate back to original angle
+                    _offsetEntity.TransformBy(
+                       Matrix3d.Rotation(0.0 - _currentAngle, Vector3d.ZAxis, _currentPoint));
+
+                    //Calculate rotation angle
+                    double angle = GetRotationAngle();
+
+                    _offsetEntity.TransformBy(
+                        Matrix3d.Rotation(angle, Vector3d.ZAxis, _currentPoint));
+                    _currentAngle = angle;
+                }
+
+                _previousPoint = _currentPoint;
+                _finalPoint = _currentPoint;
+
+                return SamplerStatus.OK;
+            }
+        }
+
+        protected override bool WorldDraw(GrxCAD.GraphicsInterface.WorldDraw draw)
+        {
+            draw.Geometry.Draw(_offsetEntity);
+            return true;
+        }
+
+        #region private methods
+
+        private bool GetEntities()
+        {
+            //Pick entity to be moved
+            PromptEntityOptions entOpt =
+                new PromptEntityOptions("\nPick an entity to move: ");
+            entOpt.SetRejectMessage(
+                "Invalid pick: must be AutoCAD entity.");
+            entOpt.AddAllowedClass(typeof(Entity), false);
+            PromptEntityResult entRes = _ed.GetEntity(entOpt);
+            if (entRes.Status == PromptStatus.OK)
+            {
+                _entity = (Entity)_tran.GetObject(
+                    entRes.ObjectId, OpenMode.ForRead);
+
+                if (_entity is BlockReference)
+                {
+                    _originalPoint = ((BlockReference)_entity).Position;
+                }
+                else
+                {
+                    //Use picked point as default moving base point
+                    Point3d pickedPt = entRes.PickedPoint;
+
+                    PromptPointOptions ptOpt = new PromptPointOptions(
+                        "\nPick moving entity's base point: &lt;" +
+                        pickedPt.X.ToString() + "," +
+                        pickedPt.Y.ToString() + ">:");
+                    ptOpt.AllowNone = true;
+
+                    PromptPointResult ptRes = _ed.GetPoint(ptOpt);
+                    if (ptRes.Status == PromptStatus.OK)
+                    {
+                        pickedPt = ptRes.Value;
+                    }
+                    else if (ptRes.Status == PromptStatus.None)
+                    {
+                        //Do nothing
+                    }
+                    else
+                    {
+                        return false;
+                    }
+
+                    _originalPoint = pickedPt;
+                }
+            }
+            else
+            {
+                return false;
+            }
+
+            //Pick guiding curve
+            PromptEntityOptions curOpt = new PromptEntityOptions(
+                "\nPick a line/polyline/arc/circle as moving path: ");
+            curOpt.SetRejectMessage(
+                "Invalid pick: must be a line, polyline, arc or circle.");
+            curOpt.AddAllowedClass(typeof(Curve), false);
+            PromptEntityResult curRes = _ed.GetEntity(curOpt);
+            if (curRes.Status == PromptStatus.OK)
+            {
+                _curve = (Curve)_tran.GetObject(
+                    curRes.ObjectId, OpenMode.ForRead);
+            }
+            else
+            {
+                return false;
+            }
+
+            _currentPoint =
+                _curve.GetClosestPointTo(_originalPoint, false);
+            _previousPoint = _currentPoint;
+            _finalPoint = _currentPoint;
+
+            return true;
+        }
+
+        private double GetRotationAngle()
+        {
+            double ang = 0.0;
+
+            //Find circle/arc centre
+            Point3d center = (_curve is Arc) ? ((Arc)_curve).Center : ((Circle)_curve).Center;
+
+            //Calculate angle. Because of my laziness, I took this shortcut
+            using (var line = new Line(center, _currentPoint))
+            {
+                ang = line.Angle;
+            }
+
+            return ang;
+        }
+
+        private void MoveEntity()
+        {
+            Vector3d displacement =
+                _originalPoint.GetVectorTo(_finalPoint);
+            _entity.TransformBy(
+                Matrix3d.Displacement(displacement));
+
+            if (_doRotation)
+            {
+                double angle = GetRotationAngle();
+
+                _entity.TransformBy(
+                    Matrix3d.Rotation(angle, Vector3d.ZAxis, _finalPoint));
+            }
+        }
+
+        #endregion
+    }
