@@ -1,0 +1,243 @@
+        /// <summary>
+        /// Point-In-Polygon Algorithm © 1998,2006,2007 Darel Rex Finley
+        /// working with straight segments ony!
+        /// http://alienryderflex.com/polygon/       
+        ///  The function will return YES if the point x,y is inside the polygon, or
+        ///  NO if it is not.  If the point is exactly on the edge of the polygon,
+        ///  then the function may return YES or NO.
+        ///  Note that division by zero is avoided because the division is protected
+        ///  by the "if" clause which surrounds it.
+        /// </summary>
+        /// <param name="polySides"></param>
+        /// <param name="polyX"></param>
+        /// <param name="polyY"></param>
+        /// <param name="p"></param>
+        /// <returns></returns>
+        public static bool pointInPolygon(int polySides, double[] polyX, double[] polyY, Point2d p)
+        {
+
+            int i, j = polySides - 1;
+            bool oddNodes = false;
+            double x = p.X;
+            double y = p.Y;
+            for (i = 0; i < polySides; i++)
+            {
+                if ((polyY[i] < y && polyY[j] >= y) || (polyY[j] < y && polyY[i] >= y))
+                {
+                    if (polyX[i] + (y - polyY[i]) / (polyY[j] - polyY[i]) * (polyX[j] - polyX[i]) < x)
+                    {
+                        oddNodes = !oddNodes;
+                    }
+                }
+                j = i;
+            }
+
+            return oddNodes;
+        }
+        /// <summary>
+        /// by Gilles Chanteau ()2010
+        /// </summary>
+        /// <param name="idCol"></param>
+        private static void ZoomObjects(ObjectIdCollection idCol)
+        {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            Database db = doc.Database;
+            Editor ed = doc.Editor;
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            using (ViewTableRecord view = ed.GetCurrentView())
+            {
+                Matrix3d WCS2DCS = Matrix3d.PlaneToWorld(view.ViewDirection);
+                WCS2DCS = Matrix3d.Displacement(view.Target - Point3d.Origin) * WCS2DCS;
+                WCS2DCS = Matrix3d.Rotation(-view.ViewTwist, view.ViewDirection, view.Target) * WCS2DCS;
+                WCS2DCS = WCS2DCS.Inverse();
+                Entity ent = (Entity)tr.GetObject(idCol[0], OpenMode.ForRead);
+                Extents3d ext = ent.GeometricExtents;
+                for (int i = 1; i < idCol.Count; i++)
+                {
+                    ent = (Entity)tr.GetObject(idCol[i], OpenMode.ForRead);
+                    Extents3d tmp = ent.GeometricExtents;
+                    ext.AddExtents(tmp);
+                }
+                ext.TransformBy(WCS2DCS);
+                view.Width = ext.MaxPoint.X - ext.MinPoint.X;
+                view.Height = ext.MaxPoint.Y - ext.MinPoint.Y;
+                view.CenterPoint = new Point2d((ext.MaxPoint.X + ext.MinPoint.X) / 2.0, (ext.MaxPoint.Y + ext.MinPoint.Y) / 2.0);
+                ed.SetCurrentView(view);
+                tr.Commit();
+            }
+        }
+        /// <summary>
+        /// test for multiple shapes inside  a straight-segmented polygon (partially borrowed from Kean Walmsley)
+        /// </summary>
+        [CommandMethod("MultiPoly", CommandFlags.UsePickSet | CommandFlags.Redraw | CommandFlags.Modal)]
+        public static void testIfShapeInside()
+        {
+            Database db = HostApplicationServices.WorkingDatabase;
+            Document doc = _AcAp.Application.DocumentManager.MdiActiveDocument;
+            Editor ed = doc.Editor;
+            DocumentLock docloc = doc.LockDocument();
+
+            using (docloc)
+            {
+
+                Transaction tr = db.TransactionManager.StartTransaction();
+
+                using (tr)
+                {
+
+                    try
+                    {
+                        PromptEntityOptions peo = new PromptEntityOptions("\nSelect a boundary polygon >>");
+
+                        peo.SetRejectMessage("\nSelect Polyline only >>");
+
+                        peo.AddAllowedClass(typeof(Polyline), false);
+
+                        PromptEntityResult res;
+
+                        res = ed.GetEntity(peo);
+                        if (res.Status != PromptStatus.OK)
+
+                            return;
+
+                        Entity ent = (Entity)tr.GetObject(res.ObjectId, OpenMode.ForRead);
+
+                        if (ent == null)
+
+                            return;
+
+                        ObjectId chkId = ent.ObjectId;
+
+                        ZoomObjects(new ObjectIdCollection() { chkId });
+
+                        Point3dCollection pts = new Point3dCollection();
+
+                        Polyline poly = (Polyline)ent as Polyline;
+
+                        if (poly != null)
+                        {
+                            int num = poly.NumberOfVertices;
+                            double[] polyX = new double[num];
+                            double[] polyY = new double[num];
+                            for (int i = 0; i < num; i++)
+                            {
+                                Point2d p = poly.GetPoint2dAt(i);
+                                polyX[i] = p.X; polyY[i] = p.Y;
+                                pts.Add(poly.GetPointAtParameter((double)i));
+
+                            }
+
+                            TypedValue[] filList = new TypedValue[2] { new TypedValue((int)DxfCode.Start, "LWPOLYLINE"), new TypedValue(70, 1) };
+
+                            SelectionFilter filter = new SelectionFilter(filList);
+
+                            PromptSelectionResult sres = ed.SelectCrossingPolygon(pts, filter);
+
+                            // Do nothing if selection is unsuccessful
+
+                            if (sres.Status != PromptStatus.OK)
+
+                                return;
+
+                            SelectionSet selSet = sres.Value;
+
+                            ObjectId[] ids = selSet.GetObjectIds();
+
+                            for (int i = 0; i < ids.Length; i++)
+                            {
+
+                                if ((ObjectId)ids[i] != chkId)//exclude a boundary from selection
+                                {
+
+                                    poly = (Polyline)tr.GetObject(ids[i], OpenMode.ForRead);
+
+                                    int vnum = poly.NumberOfVertices;
+
+                                    bool isInside = true;
+                                    for (int j = 0; j < vnum; j++)
+                                    {
+                                        Point2d p = poly.GetPoint2dAt(j);
+                                        //
+                                        isInside = pointInPolygon(num, polyX, polyY, p);
+                                        if (!isInside)
+                                        {
+                                            poly.UpgradeOpen();
+                                            poly.ColorIndex = 3;
+                                            poly.DowngradeOpen();
+                                            break;
+                                        }
+                                    }
+
+
+                                }
+                            }//
+                        }
+                        tr.Commit();
+                    }
+                    catch (System.Exception ex)
+                    {
+                        ed.WriteMessage("{0}\n{1}", ex.Message, ex.StackTrace);
+                    }
+                }//tr
+            }
+        }
+
+        /// <summary>
+        /// test is point inside a straight-segmented polygon(partially borrowed from Kean Walmsley)
+        /// </summary>
+        [CommandMethod("SinglePoint", CommandFlags.UsePickSet | CommandFlags.Modal)]
+        public static void testInside()
+        {
+            Document doc = _AcAp.Application.DocumentManager.MdiActiveDocument;
+            Database db = doc.Database;
+            Editor ed = doc.Editor;
+
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            {
+                PromptPointOptions prOpt = new PromptPointOptions("\nSpecify a point: ");
+                PromptPointResult es = ed.GetPoint(prOpt);
+                if (es.Status != PromptStatus.OK)
+                {
+                    if (es.Status == PromptStatus.Cancel)
+                    {
+                        ed.WriteMessage("\nInterrupted by user. Exit.."); return;
+                    }
+                    else
+                    {
+                        ed.WriteMessage("\nError on specifying a point.Exit..."); return;
+                    }
+                }
+                Point2d pt = new Point2d(es.Value.X, es.Value.Y);
+
+                PromptEntityOptions peo = new PromptEntityOptions("\nSelect a bounds polygon >>");
+                peo.SetRejectMessage("\nSelect Polyline only >>");
+                peo.AddAllowedClass(typeof(Polyline), false);
+                PromptEntityResult res;
+                res = ed.GetEntity(peo);
+                if (res.Status != PromptStatus.OK)
+                    return;
+                Entity ent = (Entity)tr.GetObject(res.ObjectId, OpenMode.ForRead);
+                if (ent == null)
+                    return;
+                Polyline poly = (Polyline)ent as Polyline;
+                if (poly != null)
+                {
+                    int num = poly.NumberOfVertices;
+                    double[] polyX = new double[num];
+                    double[] polyY = new double[num];
+                    for (int i = 0; i < num; i++)
+                    {
+
+                        Point2d p = poly.GetPoint2dAt(i);
+                        polyX[i] = p.X; polyY[i] = p.Y;
+
+
+                    }
+                    bool isInside = pointInPolygon(num, polyX, polyY, pt);
+                    ed.WriteMessage("\nIs point inside?\t{0}", isInside);
+                }
+                tr.Commit();
+            }
+
+        }
+    }
