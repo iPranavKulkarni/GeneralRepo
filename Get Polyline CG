@@ -1,0 +1,104 @@
+        [CommandMethod("CEN")]
+        public void Centroid()
+        {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            Database db = doc.Database;
+            Editor ed = doc.Editor;
+
+            PromptEntityOptions peo = new PromptEntityOptions("\nSelect polyline: ");
+            peo.SetRejectMessage("\nSelected object is not a polyline.");
+            peo.AddAllowedClass(typeof(GrxCAD.DatabaseServices.Polyline), true);
+            PromptEntityResult per = ed.GetEntity(peo);
+            if (per.Status != PromptStatus.OK) return;
+
+            db.Pdmode = 3;
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            {
+                GrxCAD.DatabaseServices.Polyline pline = (GrxCAD.DatabaseServices.Polyline)tr.GetObject(per.ObjectId, OpenMode.ForRead);
+                Point3d center = GetCentroid(pline);
+                BlockTableRecord cSpace = (BlockTableRecord)tr.GetObject(db.CurrentSpaceId, OpenMode.ForWrite);
+                using (var pt = new DBPoint(center))
+                {
+                    cSpace.AppendEntity(pt);
+                    tr.AddNewlyCreatedDBObject(pt, true);
+                }
+                tr.Commit();
+            }
+        }
+
+        private Point3d GetCentroid(GrxCAD.DatabaseServices.Polyline pl)
+        {
+            Point2d p0 = pl.GetPoint2dAt(0);
+            Point2d cen = new Point2d(0.0, 0.0);
+            double area = 0.0;
+            int last = pl.NumberOfVertices - 1;
+            double tmpArea;
+            Point2d tmpPoint;
+
+            if (pl.GetSegmentType(0) == SegmentType.Arc)
+            {
+                double[] datas = GetArcGeom(pl, pl.GetBulgeAt(0), 0, 1);
+                area = datas[0];
+                cen = new Point2d(datas[1], datas[2]) * datas[0];
+            }
+            for (int i = 1; i < last; i++)
+            {
+                tmpArea = TriangleAlgebricArea(p0, pl.GetPoint2dAt(i), pl.GetPoint2dAt(i + 1));
+                tmpPoint = TriangleCentroid(p0, pl.GetPoint2dAt(i), pl.GetPoint2dAt(i + 1));
+                cen += (tmpPoint * tmpArea).GetAsVector();
+                area += tmpArea;
+                if (pl.GetSegmentType(i) == SegmentType.Arc)
+                {
+                    double[] datas = GetArcGeom(pl, pl.GetBulgeAt(i), i, i + 1);
+                    area += datas[0];
+                    cen += new Vector2d(datas[1], datas[2]) * datas[0];
+                }
+            }
+            if (pl.GetSegmentType(last) == SegmentType.Arc)
+            {
+                double[] datas = GetArcGeom(pl, pl.GetBulgeAt(last), last, 0);
+                area += datas[0];
+                cen += new Vector2d(datas[1], datas[2]) * datas[0];
+            }
+            cen = cen.DivideBy(area);
+            Point3d result = new Point3d(cen.X, cen.Y, pl.Elevation);
+            return result.TransformBy(Matrix3d.PlaneToWorld(pl.Normal));
+        }
+
+        private double[] GetArcGeom(GrxCAD.DatabaseServices.Polyline pl, double bulge, int index1, int index2)
+        {
+            CircularArc2d arc = (pl.GetArcSegment2dAt(index1));
+            double arcRadius = arc.Radius;
+            Point2d arcCenter = arc.Center;
+            double arcAngle = 4.0 * Math.Atan(bulge);
+            double tmpArea = ArcAlgebricArea(arcRadius, arcAngle);
+            Point2d tmpPoint = ArcCentroid(pl.GetPoint2dAt(index1), pl.GetPoint2dAt(index2), arcCenter, tmpArea);
+            return new double[3] { tmpArea, tmpPoint.X, tmpPoint.Y };
+        }
+
+        private Point2d TriangleCentroid(Point2d p0, Point2d p1, Point2d p2)
+        {
+            return (p0 + p1.GetAsVector() + p2.GetAsVector()) / 3.0;
+        }
+
+        private double TriangleAlgebricArea(Point2d p0, Point2d p1, Point2d p2)
+        {
+            return (((p1.X - p0.X) * (p2.Y - p0.Y)) - ((p2.X - p0.X) * (p1.Y - p0.Y))) / 2.0;
+        }
+
+        private Point2d ArcCentroid(Point2d start, Point2d end, Point2d cen, double tmpArea)
+        {
+            double chord = start.GetDistanceTo(end);
+            double angle = (end - start).Angle;
+            return Polar2d(cen, angle - (Math.PI / 2.0), (chord * chord * chord) / (12.0 * tmpArea));
+        }
+
+        private double ArcAlgebricArea(double rad, double ang)
+        {
+            return rad * rad * (ang - Math.Sin(ang)) / 2.0;
+        }
+
+        private Point2d Polar2d(Point2d org, double angle, double distance)
+        {
+            return org + new Vector2d(distance * Math.Cos(angle), distance * Math.Sin(angle));
+        }
