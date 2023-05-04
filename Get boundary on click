@@ -1,0 +1,29 @@
+[CommandMethod("TestBoundary")]
+        public static void TestBoundary()
+        {
+            Document acDoc = Application.DocumentManager.MdiActiveDocument;
+            Database acDb = acDoc.Database;
+            Editor acEd = acDoc.Editor;
+            PromptPointOptions ptOptions = new PromptPointOptions("Select point ");
+            ptOptions.AllowNone = false;
+            PromptPointResult ptResult = acEd.GetPoint(ptOptions);
+
+            if (ptResult.Status != PromptStatus.OK) return;
+            DBObjectCollection collection = acEd.TraceBoundary(ptResult.Value, true);
+            using (Transaction acTrans = acDb.TransactionManager.StartTransaction())
+            {
+                ObjectId ModelSpaceId = SymbolUtilityServices.GetBlockModelSpaceId(acDb);
+                BlockTableRecord btRec = acTrans.GetObject(ModelSpaceId, OpenMode.ForWrite) as BlockTableRecord;
+                foreach (DBObject obj in collection)
+                {
+                    Entity ent = obj as Entity;
+                    if (ent != null)
+                    {
+                        ent.ColorIndex = 1;//red!!!
+                        btRec.AppendEntity(ent);
+                        acTrans.AddNewlyCreatedDBObject(ent, true);
+                    }
+                }
+                acTrans.Commit();
+            }
+        }
