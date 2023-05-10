@@ -1,0 +1,119 @@
+[CommandMethod("POP")]
+
+        public void PointOnPolyline()
+
+        {
+
+            Document doc =
+
+              Application.DocumentManager.MdiActiveDocument;
+
+            Database db = doc.Database;
+
+            Editor ed = doc.Editor;
+
+
+
+            PromptEntityOptions peo =
+
+              new PromptEntityOptions("\nSelect a polyline");
+
+            peo.SetRejectMessage("Please select a polyline");
+
+            peo.AddAllowedClass(typeof(Polyline), true);
+
+
+
+            PromptEntityResult per = ed.GetEntity(peo);
+
+            if (per.Status != PromptStatus.OK)
+
+                return;
+
+
+
+            PromptPointResult ppr = ed.GetPoint("\nSelect a point");
+
+            if (ppr.Status != PromptStatus.OK)
+
+                return;
+
+
+
+            Transaction tr = db.TransactionManager.StartTransaction();
+
+            using (tr)
+
+            {
+
+                Polyline polyline =
+
+                  tr.GetObject(per.ObjectId, OpenMode.ForRead) as Polyline;
+
+                if (polyline != null)
+
+                {
+
+                    bool isOn = IsPointOnPolyline(polyline, ppr.Value);
+
+                    ed.WriteMessage(
+
+                      "\nSelected point is {0}on the polyline.",
+
+                      isOn ? "" : "not "
+
+                    );
+
+                }
+
+                tr.Commit();
+
+            }
+
+        }
+
+
+
+        private bool IsPointOnPolyline(Polyline pl, Point3d pt)
+
+        {
+
+            bool isOn = false;
+
+            for (int i = 0; i < pl.NumberOfVertices; i++)
+
+            {
+
+                Curve3d seg = null;
+
+
+
+                SegmentType segType = pl.GetSegmentType(i);
+
+                if (segType == SegmentType.Arc)
+
+                    seg = pl.GetArcSegmentAt(i);
+
+                else if (segType == SegmentType.Line)
+
+                    seg = pl.GetLineSegmentAt(i);
+
+
+
+                if (seg != null)
+
+                {
+
+                    isOn = seg.IsOn(pt);
+
+                    if (isOn)
+
+                        break;
+
+                }
+
+            }
+
+            return isOn;
+
+        }
