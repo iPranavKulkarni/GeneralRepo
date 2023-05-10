@@ -1,0 +1,25 @@
+ public static void GetAllBlocksFromDwg(string dwgPath)
+        {
+            Document acDoc = Application.DocumentManager.MdiActiveDocument;
+            using (Database OpenDb = new Database(false, true))
+            {
+                OpenDb.ReadDwgFile(dwgPath, System.IO.FileShare.ReadWrite, true, "");
+                ObjectIdCollection ids = new ObjectIdCollection();
+                using (Transaction acTrans = OpenDb.TransactionManager.StartTransaction())
+                {
+                    BlockTable bt;
+                    bt = (BlockTable)acTrans.GetObject(OpenDb.BlockTableId, OpenMode.ForRead);
+                    foreach (ObjectId btrId in bt)
+                    {
+                        ids.Add(btrId);
+                    }
+                    acTrans.Commit();
+                }
+                if (ids.Count != 0)
+                {
+                    Database destdb = acDoc.Database;
+                    IdMapping iMap = new IdMapping();
+                    destdb.WblockCloneObjects(ids, destdb.BlockTableId, iMap, DuplicateRecordCloning.Ignore, false);
+                }
+            }
+        }
