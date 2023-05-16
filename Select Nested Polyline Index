@@ -1,0 +1,41 @@
+[CommandMethod("SelectNestedPolylineIndex")]
+        public void SelectNestedPolylineIndex()
+        {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            Database db = doc.Database;
+            Editor ed = doc.Editor;
+
+            // Prompt the user to select a polyline segment.
+            PromptNestedEntityOptions options =
+                new PromptNestedEntityOptions("\nSelect a polyline segment: ");
+            options.AllowNone = false;
+            PromptNestedEntityResult result = ed.GetNestedEntity(options);
+            if (result.Status != PromptStatus.OK)
+                return;
+
+            // If the selected entity is a polyline.
+            if (result.ObjectId.ObjectClass.Name == "AcDbPolyline")
+            {
+                // Start a transaction to open the selected polyline.
+                using (Transaction tr = db.TransactionManager.StartTransaction())
+                {
+                    // Transform the picked point from current UCS to WCS.
+                    Point3d wcsPickedPoint = result.PickedPoint.TransformBy(ed.CurrentUserCoordinateSystem);
+
+                    // Open the polyline.
+                    Polyline pline = (Polyline)tr.GetObject(result.ObjectId, OpenMode.ForRead);
+
+                    // Get the closest point to picked point on the polyline.
+                    // If the polyline is nested, it's needed to transform the picked point using the 
+                    // the transformation matrix that is applied to the polyline by its containers.
+                    Point3d pointOnPline = result.GetContainers().Length == 0 ?
+                        pline.GetClosestPointTo(wcsPickedPoint, false) : // not nested polyline
+                        pline.GetClosestPointTo(wcsPickedPoint.TransformBy(result.Transform.Inverse()), false); // nested polyline
+
+                    // Get the selected segment index.
+                    int segmentIndex = (int)pline.GetParameterAtPoint(pointOnPline);
+                    ed.WriteMessage("\nSelected segment index: {0}", segmentIndex);
+                    tr.Commit();
+                }
+            }
+        }
