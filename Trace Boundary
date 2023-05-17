@@ -1,3 +1,4 @@
+static int _index = 1;        
 [CommandMethod("TB")]
 
         public void TraceBoundary()
