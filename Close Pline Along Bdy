@@ -1,0 +1,141 @@
+ [CommandMethod("ClosePlineAlongBdy")]
+        public static void ClosePlineAlongBdy()
+        {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            Editor ed = doc.Editor;
+            Database db = doc.Database;
+
+            //Prompt the user to select the polylines. 
+            PromptEntityOptions opt = new PromptEntityOptions("\nSelect the open polyline:");
+            opt.SetRejectMessage("\nInvalid: not a polyline.");
+            opt.AddAllowedClass(typeof(Polyline), true);
+            PromptEntityResult per = ed.GetEntity(opt);
+
+            opt.Message = "\nSelect the closed polyline:";
+            PromptEntityResult per2 = ed.GetEntity(opt);
+
+            Polyline OpenPoly;
+            Polyline ClosedPoly;
+
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            {
+                if (per.Status == PromptStatus.OK)
+                {
+                    DBObject obj = tr.GetObject(per.ObjectId, OpenMode.ForWrite);
+                    OpenPoly = obj as Polyline;
+
+                    if (OpenPoly != null)
+                    {
+                        if (per2.Status == PromptStatus.OK)
+                        {
+                            obj = tr.GetObject(per2.ObjectId, OpenMode.ForRead);
+                            ClosedPoly = obj as Polyline;
+
+                            if (ClosedPoly != null)
+                            {
+                                int SegmentNoStart = 0, SegNoEndOpenPoly = 0;
+
+                                if (ClosedPoly != null)
+                                {
+                                    // Iterate through closed polyline segments. Find the segments
+                                    // the start and end of the open polyline are touching. 
+                                    int TotalVertices = ClosedPoly.NumberOfVertices;
+                                    for (int i = 1; i < TotalVertices; i++)
+                                    {
+                                        if (ClosedPoly.GetSegmentType(i) == SegmentType.Line)
+                                        {
+                                            LineSegment2d Segment = ClosedPoly.GetLineSegment2dAt(i);
+                                            double DistanceToStart = Segment.GetDistanceTo(OpenPoly.GetPoint2dAt(0));
+                                            if (DistanceToStart < 0.001) // To deal with rounding errors. 
+                                            {
+                                                // This is the segment number of the closed polyline
+                                                // the start of the open polyline is touching. 
+                                                SegmentNoStart = i;
+                                            }
+
+                                            double dToEnd = Segment.GetDistanceTo(OpenPoly.GetPoint2dAt(OpenPoly.NumberOfVertices - 1));
+                                            if (dToEnd < 0.001)
+                                            {
+                                                // This is the segment number of the closed polyline
+                                                // the end of the open polyline is touching. 
+                                                SegNoEndOpenPoly = i;
+                                            }
+                                        }
+                                        else
+                                        {
+                                            // Add code here to deal with arcs etc.
+                                        }
+                                    }
+
+                                    // Work out the number of vertices we need to add. There are
+                                    // Two solutions. We can either go from the end point to
+                                    // the start point or from the start point to the end point. 
+
+                                    int VerticesEndStart, VerticeseStartEnd;
+
+                                    if (SegmentNoStart > SegNoEndOpenPoly)
+                                    {
+                                        VerticesEndStart = SegmentNoStart - SegNoEndOpenPoly;
+                                        VerticeseStartEnd = TotalVertices - SegmentNoStart + SegNoEndOpenPoly;
+                                    }
+                                    else if (SegNoEndOpenPoly > SegmentNoStart)
+                                    {
+                                        VerticesEndStart = TotalVertices - SegNoEndOpenPoly + SegmentNoStart - 1;
+                                        VerticeseStartEnd = SegNoEndOpenPoly - SegmentNoStart;
+                                    }
+                                    else
+                                    {
+                                        VerticesEndStart = 0;
+                                        VerticeseStartEnd = 0;
+                                    }
+
+                                    int j;
+
+                                    // Add the vertices to the open polyline. 
+                                    if (VerticesEndStart < VerticeseStartEnd)
+                                    // Gets here if we are adding vertices between the end point to the start point.
+                                    {
+                                        // for loop to add the new vertices to the open polyline.  
+                                        for (int i = SegNoEndOpenPoly + 1; i <= SegNoEndOpenPoly + VerticesEndStart; i++)
+                                        {
+                                            // use j below because i may become larger that the total number of
+                                            // vertices in the closed polyline. 
+                                            if (i > TotalVertices)
+                                            {
+                                                j = i - TotalVertices;
+                                            }
+                                            else
+                                            {
+                                                j = i;
+                                            }
+
+                                            // Add the vertice to the open polyline
+                                            OpenPoly.AddVertexAt(OpenPoly.NumberOfVertices, ClosedPoly.GetPoint2dAt(j), 0, 0, 0);
+                                        }
+                                    }
+                                    else if (VerticeseStartEnd < VerticesEndStart)
+                                    // Gets here if we are adding vertices between the start point and the end point. 
+                                    {
+                                        // Reverse for loop. 
+                                        for (int i = SegNoEndOpenPoly; i >= (SegNoEndOpenPoly - VerticeseStartEnd + 1); i--)
+                                        {
+                                            if (i < 0)
+                                            {
+                                                j = i + TotalVertices;
+                                            }
+                                            else
+                                            {
+                                                j = i;
+                                            }
+                                            OpenPoly.AddVertexAt(OpenPoly.NumberOfVertices, ClosedPoly.GetPoint2dAt(j), 0, 0, 0);
+                                        }
+                                    }
+                                    OpenPoly.Closed = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                tr.Commit();
+            }
+        }
