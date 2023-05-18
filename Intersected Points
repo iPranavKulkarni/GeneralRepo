@@ -1,0 +1,185 @@
+using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.EditorInput;
+using Autodesk.AutoCAD.Geometry;
+using Autodesk.AutoCAD.Runtime;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace TestCode
+{
+    internal class IntersectionPointsCalculator
+    {
+        private readonly Document doc;
+        private readonly Database db;
+        private List<ObjectId> lineIds;
+        private ObjectId pickedLineId;
+
+        public IntersectionPointsCalculator(Document doc, Database db)
+        {
+            this.doc = doc;
+            this.db = db;
+            this.pickedLineId = getPickedLine();
+            this.lineIds = getLineIds();
+        }
+
+        private ObjectId getPickedLine()
+        {
+            PromptEntityOptions options = new PromptEntityOptions("\nPlease pick a line.");
+            PromptEntityResult result = doc.Editor.GetEntity(options);
+
+            if (result.Status == PromptStatus.OK)
+            {
+                return result.ObjectId;
+            }
+            else
+            {
+                throw new Autodesk.AutoCAD.Runtime.Exception(ErrorStatus.SubSelectionSetEmpty, "\n Did not select a line");
+            }
+        }
+
+        private List<ObjectId> getLineIds()
+        {
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            {
+                try
+                {
+                    BlockTable bt = tr.GetObject(db.BlockTableId, OpenMode.ForRead) as BlockTable;
+                    ObjectId modelSpaceId = bt[BlockTableRecord.ModelSpace];
+                    BlockTableRecord modelSpace = tr.GetObject(modelSpaceId, OpenMode.ForRead) as BlockTableRecord;
+
+                    // get all objects of type Line
+                    // we are placing it outside the linq expression
+                    // for performance reasons - which is not critical in this example
+                    // but is a good habit for issues where performance becomes critical.
+
+                    RXClass rxLine = RXClass.GetClass(typeof(Line));
+
+                    // get all the lines in the model space
+                    // we first test the type of the object id before opening it
+                    // up - again, for performance reasons. It doesn't apply in my
+                    // case, but it may do in yours, hence I've left it like this:
+
+                    List<ObjectId> lines = modelSpace.Cast<ObjectId>()
+                                                        .Where(id => id.ObjectClass == rxLine)
+                                                        .Select(id => tr.GetObject(id, OpenMode.ForRead) as Line)
+                                                        .Select(line => line.ObjectId)
+                                                        .ToList();
+
+                    return lines;
+                }
+                catch (System.Exception ex)
+                {
+                    tr.Abort();
+                    throw ex;
+                }
+                finally
+                {
+                    tr.Abort();
+                }
+            }
+        }
+
+        public List<Point3d> getIntersectingPoints()
+        {
+            List<Point3d> orderedPoints = new List<Point3d>();
+
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            {
+                Line pickedLine = tr.GetObject(pickedLineId, OpenMode.ForRead) as Line;
+                List<Point3d> intersectionPoints = getAllIntersectionPoints(tr, pickedLine);
+                
+                // There are many ways to skin a cat. The method below probably makes the most sense:
+                orderedPoints = intersectionPoints.OrderBy(point => point.DistanceTo(pickedLine.StartPoint)).ToList();
+
+                // Here is a second way:
+                // orderedPoints = intersectionPoints.OrderBy(point => XValueWhenProjectedOntoXAxis(point, pickedLine)).ToList();
+
+                tr.Abort();
+            }
+
+            return orderedPoints;
+        }
+
+        #region IntersectingPoints helper methods
+
+        private double XValueWhenProjectedOntoXAxis(Point3d point, Line pickedLine)
+        {
+            Point3d rotatedPoint = new Point3d(point.X, point.Y, point.Z);
+            rotatedPoint.TransformBy(Matrix3d.Rotation(-pickedLine.Angle, Vector3d.ZAxis, pickedLine.StartPoint));
+            return rotatedPoint.X;
+        }
+
+        private List<Point3d> getAllIntersectionPoints(Transaction tr, Line pickedLine)
+        {
+            List<Point3d> instersectionPoints = new List<Point3d>();
+
+            List<Line> lines = lineIds.Select(id => tr.GetObject(id, OpenMode.ForRead) as Line)
+                                      .ToList();
+
+            foreach (Line line in lines)
+            {
+                Point3dCollection points = new Point3dCollection();
+                pickedLine.IntersectWith(line, Intersect.OnBothOperands, points, IntPtr.Zero, IntPtr.Zero);
+
+                // if there are any points, intersecting with the line
+                // then we need to add it to the collection
+                if (points.Count > 0)
+                {
+                    foreach (Point3d point in points)
+                    {
+                        instersectionPoints.Add(point);
+                    }
+                }
+            }
+
+            return instersectionPoints;
+        }
+
+        #endregion IntersectingPoints helper methods
+
+        public void PrintPointsOrder(List<Point3d> points)
+        {
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            {
+                BlockTable acBlkTbl = tr.GetObject(db.BlockTableId, OpenMode.ForRead) as BlockTable;
+                BlockTableRecord acBlkTblRec = tr.GetObject(acBlkTbl[BlockTableRecord.ModelSpace], OpenMode.ForWrite) as BlockTableRecord;
+
+                for (int i = 0; i < points.Count; i++)
+                {
+                    using (MText mtext = new MText())
+                    {
+                        mtext.Location = points[i];
+                        mtext.TextHeight = 40;
+                        mtext.Contents = i.ToString();
+
+                        acBlkTblRec.AppendEntity(mtext);
+                        tr.AddNewlyCreatedDBObject(mtext, true);
+                    }
+                }
+
+                tr.Commit();
+            }
+        }
+    }
+}
+[CommandMethod("GetIntersectionPoints", CommandFlags.UsePickSet)]
+        public static void IntersectionPoints()
+        {
+            try
+            {
+                Document doc = Application.DocumentManager.MdiActiveDocument;
+                Database db = doc.Database;
+                IntersectionPointsCalculator calculator = new IntersectionPointsCalculator(doc, db);
+                List<Point3d> orderedPoints = calculator.getIntersectingPoints();
+
+                    // just to make sure that it's all working:
+                    // you can remove it your particular case
+                calculator.PrintPointsOrder(orderedPoints);
+            }
+            catch (System.Exception ex)
+            {
+                // Exceptions are not handled               
+            }
+        }
