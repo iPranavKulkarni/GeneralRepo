@@ -1,0 +1,82 @@
+[CommandMethod("UA")]
+        public void UpdateAttribute()
+        {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            Database db = doc.Database;
+            Editor ed = doc.Editor;
+
+            PromptResult pr = ed.GetString("\nEnter name of block to search for: ");
+            if (pr.Status != PromptStatus.OK) return;
+            string blockName = pr.StringResult.ToUpper();
+            pr = ed.GetString("\nEnter tag of attribute to update: ");
+            if (pr.Status != PromptStatus.OK) return;
+            string attbName = pr.StringResult.ToUpper();
+            pr = ed.GetString("\nEnter new value for attribute: ");
+            if (pr.Status != PromptStatus.OK) return;
+            string attbValue = pr.StringResult;
+            UpdateAttributesInDatabase(db, blockName, attbName, attbValue);
+        }
+        private void UpdateAttributesInDatabase(Database db, string blockName, string attbName, string attbValue)
+        {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            Editor ed = doc.Editor;
+
+            ObjectId msId, psId;
+            Transaction tr = db.TransactionManager.StartTransaction();
+            using (tr)
+            {
+                BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+                msId = bt[BlockTableRecord.ModelSpace];
+                psId = bt[BlockTableRecord.PaperSpace];
+                tr.Commit();
+            }
+            int msCount = UpdateAttributesInBlock(msId, blockName, attbName, attbValue);
+            int psCount = UpdateAttributesInBlock(psId, blockName, attbName, attbValue);
+            ed.Regen();            
+        }
+        private int UpdateAttributesInBlock(ObjectId btrId, string blockName, string attbName, string attbValue)
+        {
+            int changedCount = 0;
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            Database db = doc.Database;
+            Editor ed = doc.Editor;
+            Transaction tr = doc.TransactionManager.StartTransaction();
+            using (tr)
+            {
+                BlockTableRecord btr = (BlockTableRecord)tr.GetObject(btrId, OpenMode.ForRead);
+                foreach (ObjectId entId in btr)
+                {
+                    Entity ent = tr.GetObject(entId, OpenMode.ForRead) as Entity;
+                    if (ent != null)
+                    {
+                        BlockReference br = ent as BlockReference;
+                        if (br != null)
+                        {
+                            BlockTableRecord bd =  (BlockTableRecord)tr.GetObject(br.BlockTableRecord, OpenMode.ForRead);
+                            if (bd.Name.ToUpper() == blockName)
+                            {
+                                foreach (ObjectId arId in br.AttributeCollection)
+                                {
+                                    DBObject obj = tr.GetObject(arId, OpenMode.ForRead);
+
+                                    AttributeReference ar = obj as AttributeReference;
+                                    if (ar != null)
+                                    {
+                                        if (ar.Tag.ToUpper() == attbName)
+                                        {
+                                            ar.UpgradeOpen();
+                                            ar.TextString = attbValue;
+                                            ar.DowngradeOpen();
+                                            changedCount++;
+                                        }
+                                    }
+                                }
+                            }
+                            changedCount += UpdateAttributesInBlock(br.BlockTableRecord, blockName, attbName, attbValue);
+                        }
+                    }
+                }
+                tr.Commit();
+            }
+            return changedCount;
+        }
