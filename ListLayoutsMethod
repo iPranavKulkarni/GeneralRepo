@@ -1,0 +1,20 @@
+public static void ListLayoutsMethod()
+        {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            Database db = doc.Database;
+            Editor ed = doc.Editor;
+            LayoutManager layoutMgr = LayoutManager.Current;
+            ed.WriteMessage(String.Format("{0}Active Layout is : {1}", Environment.NewLine, layoutMgr.CurrentLayout));
+            ed.WriteMessage(String.Format("{0}Number of Layouts: {1}{0}List of all Layouts:", Environment.NewLine, layoutMgr.LayoutCount));
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            {
+                DBDictionary layoutDic = tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead, false) as DBDictionary;
+                foreach (DBDictionaryEntry entry in layoutDic)
+                {
+                    ObjectId layoutId = entry.Value;
+                    Layout layout = tr.GetObject(layoutId, OpenMode.ForRead) as Layout;
+                    ed.WriteMessage(String.Format("{0}--> {1}", Environment.NewLine, layout.LayoutName));
+                }
+                tr.Commit();
+            }
+        }
