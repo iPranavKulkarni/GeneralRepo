@@ -1,0 +1,16 @@
+private Arc CreateArc_3Points(Point3d Pt1, Point3d Arc_Pnt, Point3d Pt2)
+        {
+            CircularArc3d cArc = Pt1.GetVectorTo(Arc_Pnt).CrossProduct(Arc_Pnt.GetVectorTo(Pt2)).Z < 0.0 
+                                 ? new CircularArc3d(Pt2, Arc_Pnt, Pt1) // if points are clockwise
+                                 : new CircularArc3d(Pt1, Arc_Pnt, Pt2); // if points are counterclockwise
+            Point3d cen = cArc.Center;
+            Vector3d norm = cArc.Normal;
+            Arc _arc = new Arc();
+            _arc.Center = cen;
+            _arc.Radius = cArc.Radius;
+            _arc.Normal = norm;
+            double angle = cArc.ReferenceVector.AngleOnPlane(new Plane(cArc.Center, norm));
+            _arc.StartAngle = cArc.StartAngle + angle;
+            _arc.EndAngle = cArc.EndAngle + angle;
+            return _arc;
+        }
