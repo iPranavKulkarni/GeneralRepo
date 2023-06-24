@@ -1,0 +1,53 @@
+[CommandMethod("BOM")]
+        public static void BOM()
+        {
+            var doc = Application.DocumentManager.MdiActiveDocument;
+            var db = doc.Database;
+            var ed = doc.Editor;
+
+            var filter = new SelectionFilter(new[] {
+                new TypedValue(0, "INSERT"),
+                new TypedValue(2, "CELING FAN 1200 MM 1-WAY,SWITCH BOARD RIGHT,WALL POINT") });
+            var psr = ed.GetSelection(filter);
+            if (psr.Status != PromptStatus.OK)
+                return;
+
+            var ppr = ed.GetPoint("\nSpecify the table insertion point: ");
+            if (ppr.Status != PromptStatus.OK)
+                return;
+
+            using (var tr = db.TransactionManager.StartTransaction())
+            {
+                Dictionary<string, BlockReference[]> blocks = psr.Value.Cast<SelectedObject>()
+                                .Select(so => (BlockReference)tr.GetObject(so.ObjectId, OpenMode.ForRead))
+                                .GroupBy(br => br.Name).ToDictionary(gr => gr.Key, gr => gr.ToArray());
+                double rowHeight = 5.0;
+                double colWidth = 50.0;
+                Table table = new Table();
+                table.TableStyle = db.Tablestyle;
+                table.InsertRows(0, rowHeight, 1);
+                //table.InsertColumns(0, colWidth, 1);
+                //table.InsertColumns(1, colWidth * 2, 1);
+                table.InsertColumns(2, colWidth, 1);
+                table.Cells[0, 0].Value = "BLOCK DATA";
+                table.InsertRows(1, rowHeight, 1);
+                table.Cells[1, 0].Value = "PREVIEW";
+                table.Cells[1, 1].Value = "BLOCK NAME";
+                table.Cells[1, 2].Value = "COUNT";
+                int row = 2;
+                foreach (var entry in blocks)
+                {
+                    table.InsertRows(row, rowHeight, 1);
+                    table.Cells[row, 0].BlockTableRecordId = entry.Value[0].BlockTableRecord;
+                    table.Cells[row, 1].Value = entry.Key;
+                    table.Cells[row, 2].Value = entry.Value.Length;
+                    row++;
+                }
+                table.Position = ppr.Value;
+                table.TransformBy(ed.CurrentUserCoordinateSystem);
+                var cSpace = (BlockTableRecord)tr.GetObject(db.CurrentSpaceId, OpenMode.ForWrite);
+                cSpace.AppendEntity(table);
+                tr.AddNewlyCreatedDBObject(table, true);
+                tr.Commit();
+            }
+        }        
