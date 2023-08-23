@@ -1,0 +1,55 @@
+[CommandMethod("AddVetoToQuit")]
+
+static public void AddVetoToQuit()
+
+{
+
+    DocumentCollection doc = Application.DocumentManager;
+
+    doc.DocumentLockModeChanged +=
+
+        new DocumentLockModeChangedEventHandler(
+
+                            doc_DocumentLockModeChanged);
+
+ 
+
+}
+
+ 
+
+[CommandMethod("RemoveVetoToQuit")]
+
+static public void RemoveVetoToQuit()
+
+{
+
+    DocumentCollection doc = Application.DocumentManager;
+
+    doc.DocumentLockModeChanged -=
+
+                new DocumentLockModeChangedEventHandler(
+
+                               doc_DocumentLockModeChanged);
+
+ 
+
+}
+
+ 
+
+static void doc_DocumentLockModeChanged(object sender,
+
+                            DocumentLockModeChangedEventArgs e)
+
+{
+
+    if (string.Compare(e.GlobalCommandName, "QUIT", true) == 0)
+
+    {
+
+        e.Veto();
+
+    }
+
+}
