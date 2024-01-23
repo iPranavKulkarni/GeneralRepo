@@ -1,0 +1,25 @@
+using System;
+					
+public class Program
+{
+	public static void Main()
+	{
+		Console.WriteLine("please insert start value:");
+		int startValue = Convert.ToInt32(Console.ReadLine());
+		Console.WriteLine("please insert range:");
+        	int range = Convert.ToInt32(Console.ReadLine());
+		Calculate(startValue, range);
+	}
+	public static void Calculate(int stVal, int range)
+	{
+		int temp = stVal;
+		while(temp > 0){
+			Console.WriteLine(temp);
+			temp = temp-range;
+		}
+		while(temp<=stVal){
+			Console.WriteLine(temp);
+			temp = temp+range;
+		}
+	}
+}
