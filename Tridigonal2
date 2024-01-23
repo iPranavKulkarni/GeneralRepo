@@ -1,0 +1,51 @@
+
+using System;
+using System.Collections.Generic;
+					
+public class Program
+{
+	public static void Main()
+	{
+        string range = "10000X1000MC100#KL10COIU1";
+		Calculate(range);
+	}
+	public static void Calculate(string str)
+	{
+		List<string> lst = new List<string>();
+		string temp = "";
+		char[] collection = str.ToCharArray();
+		Console.WriteLine("numbers from string are: ");
+		foreach(char c in collection){
+			int bar;
+			bool b = int.TryParse(c.ToString(), out bar);
+			//Console.WriteLine(b);
+			if (!b)
+			{
+				if(!String.IsNullOrEmpty(temp)){
+				lst.Add(temp);
+					Console.WriteLine(temp);
+				}
+				temp = "";
+    		}
+			else{
+				temp = temp+ c.ToString();
+				
+			}
+		}
+		//for last number
+		if(!String.IsNullOrEmpty(temp)){
+				lst.Add(temp);
+					Console.WriteLine(temp);
+				}
+		Console.WriteLine("sum of numbers: ");
+		int sum = 0;
+		foreach(var v in lst){
+		int bar;
+			bool b = int.TryParse(v.ToString(), out bar);
+			if (b){
+			sum += bar;
+			}
+		}
+		Console.WriteLine(sum);
+	}
+}
