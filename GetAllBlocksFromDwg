@@ -1,0 +1,21 @@
+//AutoCAD .NET: Iterate Through All Blocks Excluding Model and Paper Space
+[CommandMethod("BlockIterator")]
+public static void BlockIterator_Method()
+{
+    Database database = HostApplicationServices.WorkingDatabase;
+    using (Transaction transaction = database.TransactionManager.StartTransaction())
+    {
+        BlockTable blkTable = (BlockTable)transaction.GetObject(database.BlockTableId, OpenMode.ForRead);
+        foreach (ObjectId id in blkTable)
+        {
+            BlockTableRecord btRecord = (BlockTableRecord)transaction.GetObject(id, OpenMode.ForRead);
+            if (!btRecord.IsLayout)
+            {
+                //Access to the block (not model/paper space)
+                MgdAcApplication.DocumentManager.MdiActiveDocument.Editor.WriteMessage(string.Format("\nBlock name: {0}", btRecord.Name));
+            }
+        }
+
+        transaction.Commit();
+    }
+}
